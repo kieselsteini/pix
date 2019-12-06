@@ -177,6 +177,9 @@ static void init_screen(lua_State *L, int width, int height, const char *title) 
 	if ((surface8 = SDL_CreateRGBSurface(0, width, height, 8, 0, 0, 0, 0)) == NULL)
 		luaL_error(L, "SDL_CreateRGBSurface(%d, %d, %d) failed: %s", 8, width, height);
 
+	if (SDL_SetPaletteColors(surface8->format->palette, palette, 0, 16))
+		luaL_error(L, "SDL_SetPaletteColors() failed: %s", SDL_GetError());
+
 	clip_tl.x = 0;
 	clip_tl.y = 0;
 	clip_br.x = width - 1;
@@ -372,6 +375,21 @@ static int f_circle(lua_State *L) {
 
 /*----------------------------------------------------------------------------*/
 static int f_print(lua_State *L) {
+	int x, y, bits;
+	size_t length;
+	Uint8 color = (Uint8)luaL_checkinteger(L, 1);
+	int x0 = (int)luaL_checknumber(L, 2);
+	int y0 = (int)luaL_checknumber(L, 3);
+	const Uint8 *str = (const Uint8*)luaL_checklstring(L, 4, &length);
+
+	for (; length; --length, x0 += 8, ++str) {
+		for (y = 0; y < 8; ++y) {
+			bits = font8x8[*str][y];
+			for (x = 0; x < 8; ++x) {
+				if (bits & (1 << x)) draw_pixel(x0 + x, y0 + y, color);
+			}
+		}
+	}
 	return 0;
 }
 
@@ -499,6 +517,10 @@ static int init_pix(lua_State *L) {
 		luaL_error(L, "SDL_CreateWindow() failed: %s", SDL_GetError());
 	if ((renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_ACCELERATED)) == NULL)
 		luaL_error(L,"SDL_CreateRenderer() failed: %s", SDL_GetError());
+
+	if (luaL_loadfile(L, "demo.lua") != LUA_OK)
+		lua_error(L);
+	lua_call(L, 0, 0);
 
 	run_event_loop(L);
 
