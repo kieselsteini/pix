@@ -79,6 +79,11 @@
 #define PIX_MAX_WINDOW_HEIGHT	1024
 
 
+/*----------------------------------------------------------------------------*/
+#define PIX_FPS					30
+#define PIX_FPS_TICKS			(1000 / PIX_FPS)
+
+
 /*
 ================================================================================
 
@@ -489,6 +494,42 @@ static void handle_SDL_events(lua_State *L) {
 					lua_call(L, 1, 0);
 				}
 				break;
+
+			case SDL_KEYUP:
+				if (push_callback(L, "on_keyup")) {
+					lua_pushstring(L, SDL_GetKeyName(ev.key.keysym.sym));
+					lua_call(L, 1, 0);
+				}
+				break;
+
+			case SDL_TEXTINPUT:
+				if (push_callback(L, "on_textinput")) {
+					lua_pushstring(L, ev.text.text);
+					lua_call(L, 1, 0);
+				}
+				break;
+
+			case SDL_MOUSEBUTTONDOWN:
+				if (push_callback(L, "on_mousedown")) {
+					lua_pushinteger(L, ev.button.button);
+					lua_call(L, 1, 0);
+				}
+				break;
+
+			case SDL_MOUSEBUTTONUP:
+				if (push_callback(L, "on_mouseup")) {
+					lua_pushinteger(L, ev.button.button);
+					lua_call(L, 1, 0);
+				}
+				break;
+
+			case SDL_MOUSEMOTION:
+				if (push_callback(L, "on_mousemoved")) {
+					lua_pushinteger(L, ev.motion.x);
+					lua_pushinteger(L, ev.motion.y);
+					lua_call(L, 2, 0);
+				}
+				break;
 		}
 	}
 }
@@ -496,12 +537,13 @@ static void handle_SDL_events(lua_State *L) {
 
 /*----------------------------------------------------------------------------*/
 static void run_event_loop(lua_State *L) {
-	Uint32 last_tick, current_tick, delta_ticks;
+	Uint32 last_tick, current_tick, delta_ticks, frame_no;
 
 	if (push_callback(L, "on_init"))
 		lua_call(L, 0, 0);
 
 	delta_ticks = 0;
+	frame_no = 0;
 	last_tick = SDL_GetTicks();
 
 	while (event_loop_running) {
@@ -510,6 +552,14 @@ static void run_event_loop(lua_State *L) {
 		current_tick = SDL_GetTicks();
 		delta_ticks += current_tick - last_tick;
 		last_tick = current_tick;
+
+		for (; delta_ticks >= PIX_FPS_TICKS; delta_ticks -= PIX_FPS_TICKS) {
+			++frame_no;
+			if (push_callback(L, "on_update")) {
+				lua_pushinteger(L, frame_no);
+				lua_call(L, 1, 0);
+			}
+		}
 
 		render_screen(L);
 	}
