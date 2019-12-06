@@ -378,6 +378,24 @@ static int f_print(lua_State *L) {
 
 /*----------------------------------------------------------------------------*/
 static int f_draw(lua_State *L) {
+	size_t length;
+	int x, y;
+	Uint8 color;
+	int x0 = (int)luaL_checknumber(L, 1);
+	int y0 = (int)luaL_checknumber(L, 2);
+	int w = (int)luaL_checkinteger(L, 3);
+	int h = (int)luaL_checkinteger(L, 4);
+	const Uint8 *pixels = (const Uint8*)luaL_checklstring(L, 5, &length);
+	Uint8 alpha = (Uint8)luaL_optinteger(L, 6, 256);
+
+	luaL_argcheck(L, (int)length == w * h, 5, "invalid length of pixel string");
+	for (y = 0; y < h; ++y) {
+		for (x = 0; x < w; ++x) {
+			color = hexdecoder_table[*pixels++];
+			if (color != alpha) draw_pixel(x0 + x, y0 + y, color);
+		}
+	}
+
 	return 0;
 }
 
@@ -476,6 +494,11 @@ static void run_event_loop(lua_State *L) {
 static int init_pix(lua_State *L) {
 	if (SDL_Init(SDL_INIT_EVERYTHING))
 		luaL_error(L, "SDL_Init() failed: %s", SDL_GetError());
+
+	if ((window = SDL_CreateWindow(PIX_WINDOW_TITLE, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, PIX_WINDOW_WIDTH, PIX_WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE)) == NULL)
+		luaL_error(L, "SDL_CreateWindow() failed: %s", SDL_GetError());
+	if ((renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_ACCELERATED)) == NULL)
+		luaL_error(L,"SDL_CreateRenderer() failed: %s", SDL_GetError());
 
 	run_event_loop(L);
 
