@@ -1,0 +1,513 @@
+/*
+================================================================================
+
+	PiX - a minimalistic Lua pixel game engine
+	written by Sebastian Steinhauer <s.steinhauer@yahoo.de>
+
+	This is free and unencumbered software released into the public domain.
+
+	Anyone is free to copy, modify, publish, use, compile, sell, or
+	distribute this software, either in source code form or as a compiled
+	binary, for any purpose, commercial or non-commercial, and by any
+	means.
+
+	In jurisdictions that recognize copyright laws, the author or authors
+	of this software dedicate any and all copyright interest in the
+	software to the public domain. We make this dedication for the benefit
+	of the public at large and to the detriment of our heirs and
+	successors. We intend this dedication to be an overt act of
+	relinquishment in perpetuity of all present and future rights to this
+	software under copyright law.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+	EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+	MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+	IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+	OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+	ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+	OTHER DEALINGS IN THE SOFTWARE.
+
+	For more information, please refer to <https://unlicense.org>
+
+================================================================================
+*/
+/*
+================================================================================
+
+		INCLUDES
+
+================================================================================
+*/
+/*----------------------------------------------------------------------------*/
+#include "lua.h"
+#include "lauxlib.h"
+#include "lualib.h"
+
+
+/*----------------------------------------------------------------------------*/
+#include "xxhash.h"
+#include "lz4frame.h"
+
+
+/*----------------------------------------------------------------------------*/
+#include "SDL.h"
+
+
+/*----------------------------------------------------------------------------*/
+#include "pix.h"	/* include static data */
+
+
+/*
+================================================================================
+
+		DEFINES
+
+================================================================================
+*/
+/*----------------------------------------------------------------------------*/
+#define PIX_AUTHOR				"Sebastian Steinhauer <s.steinhauer@yahoo.de>"
+#define PIX_VERSION				"0.1.0"
+
+
+/*----------------------------------------------------------------------------*/
+#define PIX_WINDOW_WIDTH		256
+#define PIX_WINDOW_HEIGHT		256
+#define PIX_WINDOW_TITLE		"PiX Window"
+#define PIX_WINDOW_PADDING		64
+
+#define PIX_MAX_WINDOW_WIDTH	1024
+#define PIX_MAX_WINDOW_HEIGHT	1024
+
+
+/*
+================================================================================
+
+		GLOBAL VARIABLES
+
+================================================================================
+*/
+/*----------------------------------------------------------------------------*/
+static int event_loop_running = -1;
+static SDL_Point clip_tl, clip_br;
+
+
+/*----------------------------------------------------------------------------*/
+static SDL_Window *window = NULL;
+static SDL_Renderer *renderer = NULL;
+static SDL_Texture *texture = NULL;
+static SDL_Surface *surface32 = NULL;
+static SDL_Surface *surface8 = NULL;
+
+
+/*
+================================================================================
+
+		HELPER FUNCTIONS
+
+================================================================================
+*/
+/*----------------------------------------------------------------------------*/
+#define swap(T, a, b)		do { T __tmp = a; a = b; a = __tmp; } while (0)
+
+
+/*----------------------------------------------------------------------------*/
+static int push_error(lua_State *L, const char *fmt, ...) {
+	va_list va;
+
+	va_start(va, fmt);
+	lua_pushnil(L);
+	lua_pushvfstring(L, fmt, va);
+	va_end(va);
+
+	return 2;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int push_callback(lua_State *L, const char *name) {
+	if (lua_getfield(L, LUA_REGISTRYINDEX, "pix_callbacks") != LUA_TTABLE) {
+		lua_pop(L, 1);
+		return 0;
+	}
+	if (lua_getfield(L, -1, name) != LUA_TFUNCTION) {
+		lua_pop(L, 2);
+		return 0;
+	}
+	lua_remove(L, -2);
+	return -1;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static void destroy_screen() {
+	if (surface8 != NULL) {
+		SDL_FreeSurface(surface8);
+		surface8 = NULL;
+	}
+	if (surface32 != NULL) {
+		SDL_FreeSurface(surface32);
+		surface32 = NULL;
+	}
+	if (texture != NULL) {
+		SDL_DestroyTexture(texture);
+		texture = NULL;
+	}
+}
+
+
+/*----------------------------------------------------------------------------*/
+static void init_screen(lua_State *L, int width, int height, const char *title) {
+	int bpp;
+	Uint32 pixel_format, rmask, gmask, bmask, amask;
+	SDL_DisplayMode dm;
+
+	destroy_screen();
+
+	if ((pixel_format = SDL_GetWindowPixelFormat(window)) == SDL_PIXELFORMAT_UNKNOWN)
+		luaL_error(L, "SDL_GetWindowPixelFormat() failed: %s", SDL_GetError());
+	if (SDL_PixelFormatEnumToMasks(pixel_format, &bpp, &rmask, &gmask, &bmask, &amask) == SDL_FALSE)
+		luaL_error(L, "SDL_PixelFormatEnumToMasks() failed: %s", SDL_GetError());
+
+	if (SDL_RenderSetLogicalSize(renderer, width, height))
+		luaL_error(L, "SDL_RenderSetLogicalSize(%d, %d) failed: %s", SDL_GetError());
+	if ((texture = SDL_CreateTexture(renderer, pixel_format, SDL_TEXTUREACCESS_STREAMING, width, height)) == NULL)
+		luaL_error(L, "SDL_CreateTexture(%d, %d) failed: %s", SDL_GetError());
+	if ((surface32 = SDL_CreateRGBSurface(0, width, height, bpp, rmask, gmask, bmask, amask)) == NULL)
+		luaL_error(L, "SDL_CreateRGBSurface(%d, %d, %d) failed: %s", bpp, width, height);
+	if ((surface8 = SDL_CreateRGBSurface(0, width, height, 8, 0, 0, 0, 0)) == NULL)
+		luaL_error(L, "SDL_CreateRGBSurface(%d, %d, %d) failed: %s", 8, width, height);
+
+	clip_tl.x = 0;
+	clip_tl.y = 0;
+	clip_br.x = width - 1;
+	clip_br.y = height - 1;
+
+	if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
+		dm.w -= PIX_WINDOW_WIDTH;
+		dm.h -= PIX_WINDOW_HEIGHT;
+		if (width > dm.w || height > dm.h) {
+			while (width > dm.w || height > dm.h) {
+				width /= 2;
+				height /= 2;
+			}
+		} else {
+			int fx = dm.w / width;
+			int fy = dm.h / height;
+			width *= fx < fy ? fx : fy;
+			height *= fx < fy ? fx : fy;
+		}
+	}
+
+	SDL_SetWindowSize(window, width, height);
+	SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+	SDL_SetWindowTitle(window, title);
+}
+
+
+/*----------------------------------------------------------------------------*/
+static void render_screen(lua_State *L) {
+	if (SDL_RenderClear(renderer))
+		luaL_error(L, "SDL_RenderClear() failed: %s", SDL_GetError());
+
+	if (texture != NULL && surface32 != NULL && surface8 != NULL) {
+		if (SDL_BlitSurface(surface8, NULL, surface32, NULL))
+			luaL_error(L, "SDL_BlitSurface() failed: %s", SDL_GetError());
+		if (SDL_UpdateTexture(texture, NULL, surface32->pixels, surface32->pitch))
+			luaL_error(L, "SDL_UpdateTexture() failed: %s", SDL_GetError());
+		if (SDL_RenderCopy(renderer, texture, NULL, NULL))
+			luaL_error(L, "SDL_RenderCopy() failed: %s", SDL_GetError());
+	}
+
+	SDL_RenderPresent(renderer);
+}
+
+
+/*----------------------------------------------------------------------------*/
+static void draw_pixel(int x, int y, Uint8 color) {
+	if ((surface8 != NULL) && (x >= clip_tl.x) && (x <= clip_br.x) && (y >= clip_tl.y) && (y <= clip_br.y)) {
+		((Uint8*)surface8->pixels)[surface8->pitch * y + x] = color % 16;
+	}
+}
+
+
+/*
+================================================================================
+
+		LUA API
+
+================================================================================
+*/
+/*----------------------------------------------------------------------------*/
+static int f_quit(lua_State *L) {
+	(void)L;
+	event_loop_running = 0;
+	return 0;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_emit(lua_State *L) {
+	const char *name = luaL_checkstring(L, 1);
+	if (push_callback(L, name)) {
+		lua_replace(L, 1);
+		lua_call(L, lua_gettop(L) - 1, 0);
+		lua_pushboolean(L, 1);
+		return 1;
+	} else {
+		return push_error(L, "undefined event handler: '%s'", name);
+	}
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_screen(lua_State *L) {
+	if (lua_gettop(L) > 0) {
+		int w = (int)luaL_checkinteger(L, 1);
+		int h = (int)luaL_checkinteger(L, 2);
+		const char *title = luaL_optstring(L, 3, PIX_WINDOW_TITLE);
+
+		luaL_argcheck(L, w > 0 && w <= PIX_MAX_WINDOW_WIDTH, 1, "invalid screen width");
+		luaL_argcheck(L, h > 0 && h <= PIX_MAX_WINDOW_HEIGHT, 2, "invalid screen height");
+
+		init_screen(L, w, h, title);
+	}
+
+	if (surface8 == NULL)
+		return push_error(L, "screen not initialized");
+
+	lua_pushinteger(L, surface8->w);
+	lua_pushinteger(L, surface8->h);
+
+	return 2;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_clear(lua_State *L) {
+	int x, y;
+	Uint8 color = (Uint8)luaL_optinteger(L, 1, 0);
+
+	for (y = clip_tl.y; y <= clip_br.y; ++y) {
+		for (x = clip_tl.x; x <= clip_br.x; ++x) {
+			draw_pixel(x, y, color);
+		}
+	}
+
+	return 0;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_pixel(lua_State *L) {
+	Uint8 color = (Uint8)luaL_checkinteger(L, 1);
+	int x0 = (int)luaL_checknumber(L, 2);
+	int y0 = (int)luaL_checknumber(L, 3);
+
+	draw_pixel(x0, y0, color);
+
+	return 0;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_line(lua_State *L) {
+	return 0;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_rect(lua_State *L) {
+	int x, y;
+	Uint8 color = (Uint8)luaL_checkinteger(L, 1);
+	int x0 = (int)luaL_checknumber(L, 2);
+	int y0 = (int)luaL_checknumber(L, 3);
+	int x1 = (int)luaL_checknumber(L, 4);
+	int y1 = (int)luaL_checknumber(L, 5);
+	int fill = lua_toboolean(L, 6);
+
+	if (x0 > x1) swap(int, x0, x1);
+	if (y0 > y1) swap(int, y0, y1);
+
+	if (fill) {
+		for (y = y0; y <= y1; ++y) {
+			for (x = x0; x <= x1; ++x) draw_pixel(x, y, color);
+		}
+	} else {
+		for (y = y0; y <= y1; ++y) {
+			draw_pixel(x0, y, color);
+			draw_pixel(x1, y, color);
+		}
+		for (x = x0; x <= x1; ++x) {
+			draw_pixel(x, y0, color);
+			draw_pixel(x, y1, color);
+		}
+	}
+
+	return 0;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_circle(lua_State *L) {
+	int x, y, dx, dy, dist;
+	Uint8 color = (Uint8)luaL_checkinteger(L, 1);
+	int x0 = (int)luaL_checknumber(L, 2);
+	int y0 = (int)luaL_checknumber(L, 3);
+	int radius = (int)luaL_checknumber(L, 4);
+	int r0sq = lua_toboolean(L, 5) ? 0 : ((radius - 1) * (radius - 1));
+	int r1sq = radius * radius;
+
+	for (y = -radius; y <= radius; ++y) {
+		dy = y * y;
+		for (x = -radius; x <= radius; ++x) {
+			dx = x * x;
+			dist = dx + dy;
+			if (dist >= r0sq && dist <= r1sq) draw_pixel(x0 + x, y0 + y, color);
+		}
+	}
+
+	return 0;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_print(lua_State *L) {
+	return 0;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_draw(lua_State *L) {
+	return 0;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static const luaL_Reg funcs[] = {
+	{ "quit", f_quit },
+	{ "emit", f_emit },
+	{ "screen", f_screen },
+	{ "clear", f_clear },
+	{ "pixel", f_pixel },
+	{ "line", f_line },
+	{ "rect", f_rect },
+	{ "circle", f_circle },
+	{ "print", f_print },
+	{ "draw", f_draw },
+	{ NULL, NULL }
+};
+
+
+/*----------------------------------------------------------------------------*/
+static int open_pix_module(lua_State *L) {
+	luaL_newlib(L, funcs);
+
+	lua_pushstring(L, PIX_AUTHOR);
+	lua_setfield(L, -2, "__AUTHOR");
+
+	lua_pushstring(L, PIX_VERSION);
+	lua_setfield(L, -2, "__VERSION");
+
+	return 1;
+}
+
+
+/*
+================================================================================
+
+		EVENT LOOP
+
+================================================================================
+*/
+/*----------------------------------------------------------------------------*/
+static void handle_SDL_events(lua_State *L) {
+	SDL_Event ev;
+
+	while (SDL_PollEvent(&ev)) {
+		switch (ev.type) {
+			case SDL_QUIT:
+				event_loop_running = 0;
+				break;
+
+			case SDL_KEYDOWN:
+				if (push_callback(L, "on_keydown")) {
+					lua_pushstring(L, SDL_GetKeyName(ev.key.keysym.sym));
+					lua_call(L, 1, 0);
+				}
+				break;
+		}
+	}
+}
+
+
+/*----------------------------------------------------------------------------*/
+static void run_event_loop(lua_State *L) {
+	Uint32 last_tick, current_tick, delta_ticks;
+
+	if (push_callback(L, "on_init"))
+		lua_call(L, 0, 0);
+
+	delta_ticks = 0;
+	last_tick = SDL_GetTicks();
+
+	while (event_loop_running) {
+		handle_SDL_events(L);
+
+		current_tick = SDL_GetTicks();
+		delta_ticks += current_tick - last_tick;
+		last_tick = current_tick;
+
+		render_screen(L);
+	}
+
+	if (push_callback(L, "on_quit"))
+		lua_call(L, 0, 0);
+}
+
+
+/*
+================================================================================
+
+		INIT / SHUTDOWN
+
+================================================================================
+*/
+/*----------------------------------------------------------------------------*/
+static int init_pix(lua_State *L) {
+	if (SDL_Init(SDL_INIT_EVERYTHING))
+		luaL_error(L, "SDL_Init() failed: %s", SDL_GetError());
+
+	run_event_loop(L);
+
+	return 0;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static void shutdown_pix() {
+	destroy_screen();
+	SDL_Quit();
+}
+
+
+/*----------------------------------------------------------------------------*/
+int main() {
+	lua_State *L = luaL_newstate();
+
+	luaL_openlibs(L);
+	luaL_requiref(L, "pix", open_pix_module, 1);
+	lua_setfield(L, LUA_REGISTRYINDEX, "pix_callbacks");
+
+	lua_getglobal(L, "debug");
+	lua_getfield(L, -1, "traceback");
+	lua_remove(L, -2);
+
+	lua_pushcfunction(L, init_pix);
+	if (lua_pcall(L, 0, 0, -2) != LUA_OK) {
+		fprintf(stderr, "%s\n", lua_tostring(L, -1));
+	}
+
+	lua_close(L);
+	shutdown_pix();
+	return 0;
+}
