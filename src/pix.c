@@ -442,6 +442,89 @@ static int f_draw(lua_State *L) {
 
 
 /*----------------------------------------------------------------------------*/
+static int f_xxhash(lua_State *L) {
+	size_t length;
+	const char *data = luaL_checklstring(L, 1, &length);
+	unsigned int seed = (unsigned int)luaL_optinteger(L, 2, 0);
+
+	lua_pushinteger(L, XXH32(data, length, seed));
+
+	return 1;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_compress(lua_State *L) {
+	LZ4F_preferences_t prefs;
+	size_t src_size, dst_size;
+	luaL_Buffer buffer;
+	char *dst_data;
+	const char *src_data = luaL_checklstring(L, 1, &src_size);
+	int compression_level = (int)luaL_optinteger(L, 2, 9);
+
+	SDL_zero(prefs);
+	prefs.compressionLevel = compression_level;
+
+	dst_size = LZ4F_compressFrameBound(src_size, &prefs);
+	if (LZ4F_isError(dst_size))
+		return push_error(L, "LZ4F_compressFrameBound() failed: %s", LZ4F_getErrorName(dst_size));
+
+	dst_data = luaL_buffinitsize(L, &buffer, dst_size);
+	dst_size = LZ4F_compressFrame(dst_data, dst_size, src_data, src_size, &prefs);
+
+	if (LZ4F_isError(dst_size))
+		return push_error(L, "LZ4F_compressFrame() failed: %s", LZ4F_getErrorName(dst_size));
+
+	luaL_pushresultsize(&buffer, dst_size);
+	return 1;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_decompress(lua_State *L) {
+	size_t src_size, dst_size, lz_avail, lz_hint;
+	char data[1024 * 64];
+	luaL_Buffer buffer;
+	LZ4F_dctx *dctx;
+	LZ4F_errorCode_t lz_err;
+	LZ4F_decompressOptions_t options;
+	const char *src_data = luaL_checklstring(L, 1, &src_size);
+
+	lz_err = LZ4F_createDecompressionContext(&dctx, LZ4F_VERSION);
+	if (LZ4F_isError(lz_err))
+		return push_error(L, "LZ4F_createDecompressionContext() failed: %s", LZ4F_getErrorName(lz_err));
+
+	SDL_zero(options);
+	luaL_buffinit(L, &buffer);
+
+	for (;;) {
+		lz_avail = src_size;
+		dst_size = sizeof(data);
+		lz_hint = LZ4F_decompress(dctx, data, &dst_size, src_data, &lz_avail, &options);
+
+		if (LZ4F_isError(lz_hint)) {
+			LZ4F_freeDecompressionContext(dctx);
+			return push_error(L, "LZ4F_decompress() failed: %s", LZ4F_getErrorName(lz_hint));
+		}
+		if (dst_size == 0) {
+			LZ4F_freeDecompressionContext(dctx);
+			return push_error(L, "LZ4F_decompress() returned no output");
+		}
+
+		luaL_addlstring(&buffer, data, dst_size);
+		src_data += lz_avail;
+		src_size -= lz_avail;
+
+		if (lz_hint == 0) break;
+	}
+
+	LZ4F_freeDecompressionContext(dctx);
+	luaL_pushresult(&buffer);
+	return 1;
+}
+
+
+/*----------------------------------------------------------------------------*/
 static const luaL_Reg funcs[] = {
 	{ "quit", f_quit },
 	{ "emit", f_emit },
@@ -453,6 +536,11 @@ static const luaL_Reg funcs[] = {
 	{ "circle", f_circle },
 	{ "print", f_print },
 	{ "draw", f_draw },
+
+	{ "xxhash", f_xxhash },
+	{ "compress", f_compress },
+	{ "decompress", f_decompress },
+
 	{ NULL, NULL }
 };
 
