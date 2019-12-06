@@ -94,6 +94,7 @@
 /*----------------------------------------------------------------------------*/
 static int event_loop_running = -1;
 static SDL_Point clip_tl, clip_br;
+static Uint8 palette_mapping[16];
 
 
 /*----------------------------------------------------------------------------*/
@@ -112,6 +113,9 @@ static SDL_Surface *surface8 = NULL;
 ================================================================================
 */
 /*----------------------------------------------------------------------------*/
+#define minimum(a, b)		((a) < (b) ? (a) : (b))
+#define maximum(a, b)		((a) > (b) ? (a) : (b))
+#define clamp(x, min, max)	maximum(minimum(x, max), min)
 #define swap(T, a, b)		do { T __tmp = a; a = b; a = __tmp; } while (0)
 
 
@@ -162,7 +166,7 @@ static void destroy_screen() {
 
 /*----------------------------------------------------------------------------*/
 static void init_screen(lua_State *L, int width, int height, const char *title) {
-	int bpp;
+	int i, bpp;
 	Uint32 pixel_format, rmask, gmask, bmask, amask;
 	SDL_DisplayMode dm;
 
@@ -189,6 +193,7 @@ static void init_screen(lua_State *L, int width, int height, const char *title) 
 	clip_tl.y = 0;
 	clip_br.x = width - 1;
 	clip_br.y = height - 1;
+	for (i = 0; i < 16; ++i) palette_mapping[i] = i;
 
 	if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
 		dm.w -= PIX_WINDOW_WIDTH;
@@ -233,7 +238,7 @@ static void render_screen(lua_State *L) {
 /*----------------------------------------------------------------------------*/
 static void draw_pixel(int x, int y, Uint8 color) {
 	if ((surface8 != NULL) && (x >= clip_tl.x) && (x <= clip_br.x) && (y >= clip_tl.y) && (y <= clip_br.y)) {
-		((Uint8*)surface8->pixels)[surface8->pitch * y + x] = color % 16;
+		((Uint8*)surface8->pixels)[surface8->pitch * y + x] = palette_mapping[color % 16];
 	}
 }
 
@@ -244,6 +249,13 @@ static void draw_pixel(int x, int y, Uint8 color) {
 		LUA API
 
 ================================================================================
+*/
+/*
+--------------------------------------------------------------------------------
+
+		Misc Functions
+
+--------------------------------------------------------------------------------
 */
 /*----------------------------------------------------------------------------*/
 static int f_quit(lua_State *L) {
@@ -290,6 +302,91 @@ static int f_screen(lua_State *L) {
 }
 
 
+/*----------------------------------------------------------------------------*/
+static int f_color(lua_State *L) {
+	SDL_Color *color;
+	int idx = (int)luaL_checkinteger(L, 1);
+
+	luaL_argcheck(L, idx >= 0 && idx < 16, 1, "invalid color index");
+	color = &palette[idx];
+
+	if (lua_gettop(L) > 1) {
+		int r = (int)luaL_checknumber(L, 2);
+		int g = (int)luaL_checknumber(L, 3);
+		int b = (int)luaL_checknumber(L, 4);
+		color->r = (Uint8)clamp(r, 0, 255);
+		color->g = (Uint8)clamp(g, 0, 255);
+		color->b = (Uint8)clamp(b, 0, 255);
+	}
+
+	lua_pushinteger(L, color->r);
+	lua_pushinteger(L, color->g);
+	lua_pushinteger(L, color->b);
+
+	return 3;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_palette(lua_State *L) {
+	int i, idx, color;
+	switch (lua_gettop(L)) {
+		case 0: /* no params reset palette */
+			for (i = 0; i < 16; ++i) palette_mapping[i] = i;
+			return 0;
+		case 1: /* return the mapping for color */
+			idx = (int)luaL_checkinteger(L, 1);
+			luaL_argcheck(L, idx >= 0 && idx < 16, 1, "invalid color index");
+			lua_pushinteger(L, palette_mapping[idx]);
+			return 1;
+		case 2: /* remap a color */
+			idx = (int)luaL_checkinteger(L, 1);
+			color = (int)luaL_checkinteger(L, 2);
+			luaL_argcheck(L, idx >= 0 && idx < 16, 1, "invalid color index");
+			luaL_argcheck(L, idx >= 0 && idx < 16, 2, "invalid color index");
+			palette_mapping[idx] = color;
+			lua_pushinteger(L, color);
+			return 1;
+		default: /* wrong number of arguments */
+			return luaL_error(L, "wrong number of arguments");
+	}
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_fullscreen(lua_State *L) {
+	Uint32 flags;
+
+	if (lua_gettop(L) > 0) {
+		int fullscreen = lua_toboolean(L, 1);
+		SDL_SetWindowFullscreen(window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+	}
+
+	flags = SDL_GetWindowFlags(window);
+	lua_pushboolean(L, flags & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP));
+	return 1;
+}
+
+
+/*----------------------------------------------------------------------------*/
+static int f_mousecursor(lua_State *L) {
+	if (lua_gettop(L) > 0) {
+		int show = lua_toboolean(L, 1);
+		SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE);
+	}
+
+	lua_pushboolean(L, SDL_ShowCursor(SDL_QUERY) == SDL_ENABLE);
+	return 1;
+}
+
+
+/*
+--------------------------------------------------------------------------------
+
+		Drawing Functions
+
+--------------------------------------------------------------------------------
+*/
 /*----------------------------------------------------------------------------*/
 static int f_clear(lua_State *L) {
 	int x, y;
@@ -441,6 +538,13 @@ static int f_draw(lua_State *L) {
 }
 
 
+/*
+--------------------------------------------------------------------------------
+
+		Compression Functions
+
+--------------------------------------------------------------------------------
+*/
 /*----------------------------------------------------------------------------*/
 static int f_xxhash(lua_State *L) {
 	size_t length;
@@ -526,9 +630,15 @@ static int f_decompress(lua_State *L) {
 
 /*----------------------------------------------------------------------------*/
 static const luaL_Reg funcs[] = {
+	/* Misc Functions */
 	{ "quit", f_quit },
 	{ "emit", f_emit },
 	{ "screen", f_screen },
+	{ "palette", f_palette },
+	{ "color", f_color },
+	{ "fullscreen", f_fullscreen },
+	{ "mousecursor", f_mousecursor },
+	/* Drawing Functions */
 	{ "clear", f_clear },
 	{ "pixel", f_pixel },
 	{ "line", f_line },
@@ -536,11 +646,11 @@ static const luaL_Reg funcs[] = {
 	{ "circle", f_circle },
 	{ "print", f_print },
 	{ "draw", f_draw },
-
+	/* Compression Functions */
 	{ "xxhash", f_xxhash },
 	{ "compress", f_compress },
 	{ "decompress", f_decompress },
-
+	/* Sentinel */
 	{ NULL, NULL }
 };
 
