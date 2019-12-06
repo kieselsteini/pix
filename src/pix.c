@@ -314,6 +314,24 @@ static int f_pixel(lua_State *L) {
 
 /*----------------------------------------------------------------------------*/
 static int f_line(lua_State *L) {
+	Uint8 color = (Uint8)luaL_checkinteger(L, 1);
+	int x0 = (int)luaL_checknumber(L, 2);
+	int y0 = (int)luaL_checknumber(L, 3);
+	int x1 = (int)luaL_checknumber(L, 4);
+	int y1 = (int)luaL_checknumber(L, 5);
+
+	int dx =  abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+	int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+	int e2, err = dx + dy;
+
+	for (;;) {
+		draw_pixel(x0, y0, color);
+		if (x0 == x1 && y0 == y1) break;
+		e2 = err * 2;
+		if (e2 > dy) { err += dy; x0 += sx; }
+		if (e2 < dx) { err += dx; y0 += sy; }
+	}
+
 	return 0;
 }
 
