@@ -95,6 +95,7 @@
 static int event_loop_running = -1;
 static SDL_Point clip_tl, clip_br;
 static Uint8 palette_mapping[16];
+static int palette_modified;
 
 
 /*----------------------------------------------------------------------------*/
@@ -186,13 +187,11 @@ static void init_screen(lua_State *L, int width, int height, const char *title) 
 	if ((surface8 = SDL_CreateRGBSurface(0, width, height, 8, 0, 0, 0, 0)) == NULL)
 		luaL_error(L, "SDL_CreateRGBSurface(%d, %d, %d) failed: %s", 8, width, height);
 
-	if (SDL_SetPaletteColors(surface8->format->palette, palette, 0, 16))
-		luaL_error(L, "SDL_SetPaletteColors() failed: %s", SDL_GetError());
-
 	clip_tl.x = 0;
 	clip_tl.y = 0;
 	clip_br.x = width - 1;
 	clip_br.y = height - 1;
+	palette_modified = -1;
 	for (i = 0; i < 16; ++i) palette_mapping[i] = i;
 
 	if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
@@ -223,6 +222,11 @@ static void render_screen(lua_State *L) {
 		luaL_error(L, "SDL_RenderClear() failed: %s", SDL_GetError());
 
 	if (texture != NULL && surface32 != NULL && surface8 != NULL) {
+		if (palette_modified) {
+			palette_modified = 0;
+			if (SDL_SetPaletteColors(surface8->format->palette, palette, 0, 16))
+				luaL_error(L, "SDL_SetPaletteColors() failed: %s", SDL_GetError());
+		}
 		if (SDL_BlitSurface(surface8, NULL, surface32, NULL))
 			luaL_error(L, "SDL_BlitSurface() failed: %s", SDL_GetError());
 		if (SDL_UpdateTexture(texture, NULL, surface32->pixels, surface32->pitch))
