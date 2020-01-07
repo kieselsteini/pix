@@ -66,7 +66,7 @@
 */
 /*----------------------------------------------------------------------------*/
 #define PIX_AUTHOR				"Sebastian Steinhauer <s.steinhauer@yahoo.de>"
-#define PIX_VERSION				"0.1.1"
+#define PIX_VERSION				"0.1.2"
 
 
 /*----------------------------------------------------------------------------*/
@@ -827,7 +827,8 @@ int main() {
 
 	lua_pushcfunction(L, init_pix);
 	if (lua_pcall(L, 0, 0, -2) != LUA_OK) {
-		fprintf(stderr, "%s\n", lua_tostring(L, -1));
+		const char *msg = luaL_gsub(L, lua_tostring(L, -1), "\t", "    ");
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "PiX Panic", msg, window);
 	}
 
 	lua_close(L);
