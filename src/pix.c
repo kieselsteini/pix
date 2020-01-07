@@ -66,7 +66,7 @@
 */
 /*----------------------------------------------------------------------------*/
 #define PIX_AUTHOR				"Sebastian Steinhauer <s.steinhauer@yahoo.de>"
-#define PIX_VERSION				"0.1.2"
+#define PIX_VERSION				"0.2.0"
 
 
 /*----------------------------------------------------------------------------*/
@@ -738,6 +738,45 @@ static void handle_SDL_events(lua_State *L) {
 					lua_pushinteger(L, ev.motion.x);
 					lua_pushinteger(L, ev.motion.y);
 					lua_call(L, 2, 0);
+				}
+				break;
+
+			case SDL_CONTROLLERDEVICEADDED:
+				if (SDL_GameControllerOpen(ev.cdevice.which) && push_callback(L, "on_controlleradded")) {
+					lua_pushinteger(L, ev.cdevice.which);
+					lua_call(L, 1, 0);
+				}
+				break;
+
+			case SDL_CONTROLLERDEVICEREMOVED:
+				if (push_callback(L, "on_controllerremoved")) {
+					lua_pushinteger(L, ev.cdevice.which);
+					lua_call(L, 1, 0);
+				}
+				break;
+
+			case SDL_CONTROLLERBUTTONDOWN:
+				if (push_callback(L, "on_controllerdown")) {
+					lua_pushinteger(L, ev.cbutton.which);
+					lua_pushstring(L, SDL_GameControllerGetStringForButton(ev.cbutton.button));
+					lua_call(L, 2, 0);
+				}
+				break;
+
+			case SDL_CONTROLLERBUTTONUP:
+				if (push_callback(L, "on_controllerup")) {
+					lua_pushinteger(L, ev.cbutton.which);
+					lua_pushstring(L, SDL_GameControllerGetStringForButton(ev.cbutton.button));
+					lua_call(L, 2, 0);
+				}
+				break;
+
+			case SDL_CONTROLLERAXISMOTION:
+				if (push_callback(L, "on_controllermotion")) {
+					lua_pushinteger(L, ev.caxis.which);
+					lua_pushstring(L, SDL_GameControllerGetStringForAxis(ev.caxis.axis));
+					lua_pushnumber(L, ev.caxis.value >= 0 ? (lua_Number)ev.caxis.value / 32767.0 : (lua_Number)ev.caxis.value / 32768.0);
+					lua_call(L, 3, 0);
 				}
 				break;
 		}
