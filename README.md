@@ -107,3 +107,47 @@ Perform a LZ4 compression on the given *binary* string.
 
 ### pix.decompress(binary)
 Decompress the given LZ4 *binary* string and return a decompressed string.
+
+## Event Callbacks
+
+### pix.on_init()
+Called before the event loop starts. Will be called only once.
+
+### pix.on_quit()
+Called before the event loop stops. Will be called only once.
+
+### pix.on_update(frame_number)
+Called 30 times per second.
+
+### pix.on_mousedown(button)
+Called when a mouse button was pressed.
+
+### pix.on_mouseup(button)
+Called when a mouse button was released.
+
+### pix.on_mousemoved(x, y)
+Called when a mouse was moved.
+
+### pix.on_keydown(key)
+Called when a key was pressed.
+
+### pix.on_keyup(key)
+Called when a key was released.
+
+### pix.on_textinput(text)
+Called when a text was entered.
+
+### pix.on_controlleradded(id)
+Called when a game controller was added.
+
+### pix.on_controllerremoved(id)
+Called when a game controller was removed.
+
+### pix.on_controllerdown(id, button)
+Called when a button on a game controller was pressed.
+
+### pix.on_controllerup(id, button)
+Called when a button on a game controller was released.
+
+### pix.on_controllermoved(id, axis, value)
+Called when an axis on a game controller was moved.

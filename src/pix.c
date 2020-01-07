@@ -772,7 +772,7 @@ static void handle_SDL_events(lua_State *L) {
 				break;
 
 			case SDL_CONTROLLERAXISMOTION:
-				if (push_callback(L, "on_controllermotion")) {
+				if (push_callback(L, "on_controllermoved")) {
 					lua_pushinteger(L, ev.caxis.which);
 					lua_pushstring(L, SDL_GameControllerGetStringForAxis(ev.caxis.axis));
 					lua_pushnumber(L, ev.caxis.value >= 0 ? (lua_Number)ev.caxis.value / 32767.0 : (lua_Number)ev.caxis.value / 32768.0);
