@@ -66,7 +66,7 @@
 */
 /*----------------------------------------------------------------------------*/
 #define PIX_AUTHOR				"Sebastian Steinhauer <s.steinhauer@yahoo.de>"
-#define PIX_VERSION				"0.1.0"
+#define PIX_VERSION				"0.1.1"
 
 
 /*----------------------------------------------------------------------------*/
@@ -95,7 +95,8 @@
 static int event_loop_running = -1;
 static SDL_Point clip_tl, clip_br;
 static Uint8 palette_mapping[16];
-static int palette_modified;
+static int palette_modified = 0;
+static int screen_modified = 0;
 
 
 /*----------------------------------------------------------------------------*/
@@ -191,7 +192,7 @@ static void init_screen(lua_State *L, int width, int height, const char *title) 
 	clip_tl.y = 0;
 	clip_br.x = width - 1;
 	clip_br.y = height - 1;
-	palette_modified = -1;
+	screen_modified = palette_modified = -1;
 	for (i = 0; i < 16; ++i) palette_mapping[i] = i;
 
 	if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
@@ -222,15 +223,18 @@ static void render_screen(lua_State *L) {
 		luaL_error(L, "SDL_RenderClear() failed: %s", SDL_GetError());
 
 	if (texture != NULL && surface32 != NULL && surface8 != NULL) {
-		if (palette_modified) {
-			palette_modified = 0;
-			if (SDL_SetPaletteColors(surface8->format->palette, palette, 0, 16))
-				luaL_error(L, "SDL_SetPaletteColors() failed: %s", SDL_GetError());
+		if (screen_modified) {
+			screen_modified = 0;
+			if (palette_modified) {
+				palette_modified = 0;
+				if (SDL_SetPaletteColors(surface8->format->palette, palette, 0, 16))
+					luaL_error(L, "SDL_SetPaletteColors() failed: %s", SDL_GetError());
+			}
+			if (SDL_BlitSurface(surface8, NULL, surface32, NULL))
+				luaL_error(L, "SDL_BlitSurface() failed: %s", SDL_GetError());
+			if (SDL_UpdateTexture(texture, NULL, surface32->pixels, surface32->pitch))
+				luaL_error(L, "SDL_UpdateTexture() failed: %s", SDL_GetError());
 		}
-		if (SDL_BlitSurface(surface8, NULL, surface32, NULL))
-			luaL_error(L, "SDL_BlitSurface() failed: %s", SDL_GetError());
-		if (SDL_UpdateTexture(texture, NULL, surface32->pixels, surface32->pitch))
-			luaL_error(L, "SDL_UpdateTexture() failed: %s", SDL_GetError());
 		if (SDL_RenderCopy(renderer, texture, NULL, NULL))
 			luaL_error(L, "SDL_RenderCopy() failed: %s", SDL_GetError());
 	}
@@ -243,6 +247,7 @@ static void render_screen(lua_State *L) {
 static void draw_pixel(int x, int y, Uint8 color) {
 	if ((surface8 != NULL) && (x >= clip_tl.x) && (x <= clip_br.x) && (y >= clip_tl.y) && (y <= clip_br.y)) {
 		((Uint8*)surface8->pixels)[surface8->pitch * y + x] = palette_mapping[color % 16];
+		screen_modified = -1;
 	}
 }
 
@@ -642,6 +647,7 @@ static const luaL_Reg funcs[] = {
 	{ "color", f_color },
 	{ "fullscreen", f_fullscreen },
 	{ "mousecursor", f_mousecursor },
+
 	/* Drawing Functions */
 	{ "clear", f_clear },
 	{ "pixel", f_pixel },
@@ -650,10 +656,12 @@ static const luaL_Reg funcs[] = {
 	{ "circle", f_circle },
 	{ "print", f_print },
 	{ "draw", f_draw },
+
 	/* Compression Functions */
 	{ "xxhash", f_xxhash },
 	{ "compress", f_compress },
 	{ "decompress", f_decompress },
+
 	/* Sentinel */
 	{ NULL, NULL }
 };
