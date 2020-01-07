@@ -92,7 +92,7 @@ Draw a circle around *x0*, *y0* with *radius* and color *color*.
 Draw the given text at *x*, *y* with color *color* using the builtin 8x8 pixel font.
 
 
-### pix.draw(x, y, width, height, pixels [, transparent_color])
+### pix.draw(pixels, x, y, width, height [, transparent_color])
 Draw the given string of *pixels* at *x*, *y* with the *width*, *height*.
 The string must contain a hex character (0-9,a-f,A-F) per pixel.
 

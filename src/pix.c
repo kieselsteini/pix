@@ -66,7 +66,7 @@
 */
 /*----------------------------------------------------------------------------*/
 #define PIX_AUTHOR				"Sebastian Steinhauer <s.steinhauer@yahoo.de>"
-#define PIX_VERSION				"0.2.0"
+#define PIX_VERSION				"0.3.0"
 
 
 /*----------------------------------------------------------------------------*/
@@ -528,14 +528,14 @@ static int f_draw(lua_State *L) {
 	size_t length;
 	int x, y;
 	Uint8 color;
-	int x0 = (int)luaL_checknumber(L, 1);
-	int y0 = (int)luaL_checknumber(L, 2);
-	int w = (int)luaL_checkinteger(L, 3);
-	int h = (int)luaL_checkinteger(L, 4);
-	const Uint8 *pixels = (const Uint8*)luaL_checklstring(L, 5, &length);
+	const Uint8 *pixels = (const Uint8*)luaL_checklstring(L, 1, &length);
+	int x0 = (int)luaL_checknumber(L, 2);
+	int y0 = (int)luaL_checknumber(L, 3);
+	int w = (int)luaL_checkinteger(L, 4);
+	int h = (int)luaL_checkinteger(L, 5);
 	Uint8 alpha = (Uint8)luaL_optinteger(L, 6, 256);
 
-	luaL_argcheck(L, (int)length == w * h, 5, "invalid length of pixel string");
+	luaL_argcheck(L, (int)length == w * h, 1, "invalid length of pixel string");
 	for (y = 0; y < h; ++y) {
 		for (x = 0; x < w; ++x) {
 			color = hexdecoder_table[*pixels++];
