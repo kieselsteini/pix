@@ -45,6 +45,14 @@ pix.color(0, 255, 255, 255) -- set color index 0 to #ffffff
 ```
 
 
+### pix.clearcolor([index])
+Set the color for clearing the screen.
+```lua
+local color = pix.clearcolor() -- get the current clear color
+pix.clearcolor(15) -- set the clear color to 15
+```
+
+
 ### pix.fullscreen([fullscreen])
 Toggle fullscreen mode for the screen.
 ```lua
@@ -62,7 +70,7 @@ pix.mousecursor(false) -- hide the system mouse cursor
 
 
 ### pix.clear([color])
-Clear the whole screen with the given *color*. It will be 0 on default.
+Clear the whole screen with the given *color*. It will be the clear color on default.
 ```lua
 pix.clear() -- clear the whole screen
 pix.clear(15) -- clear the screen with color 15

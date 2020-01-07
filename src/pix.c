@@ -66,7 +66,7 @@
 */
 /*----------------------------------------------------------------------------*/
 #define PIX_AUTHOR				"Sebastian Steinhauer <s.steinhauer@yahoo.de>"
-#define PIX_VERSION				"0.3.0"
+#define PIX_VERSION				"0.4.0"
 
 
 /*----------------------------------------------------------------------------*/
@@ -97,6 +97,7 @@ static SDL_Point clip_tl, clip_br;
 static Uint8 palette_mapping[16];
 static int palette_modified = 0;
 static int screen_modified = 0;
+static Uint8 clear_color = 0;
 
 
 /*----------------------------------------------------------------------------*/
@@ -193,6 +194,7 @@ static void init_screen(lua_State *L, int width, int height, const char *title) 
 	clip_br.x = width - 1;
 	clip_br.y = height - 1;
 	screen_modified = palette_modified = -1;
+	clear_color = 0;
 	for (i = 0; i < 16; ++i) palette_mapping[i] = i;
 
 	if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
@@ -219,6 +221,10 @@ static void init_screen(lua_State *L, int width, int height, const char *title) 
 
 /*----------------------------------------------------------------------------*/
 static void render_screen(lua_State *L) {
+	const SDL_Color *color = &palette[palette_mapping[clear_color]];
+
+	if (SDL_SetRenderDrawColor(renderer, color->r, color->g, color->b, 255))
+		luaL_error(L, "SDL_SetRenderDrawColor() failed: %s", SDL_GetError());
 	if (SDL_RenderClear(renderer))
 		luaL_error(L, "SDL_RenderClear() failed: %s", SDL_GetError());
 
@@ -363,6 +369,16 @@ static int f_palette(lua_State *L) {
 
 
 /*----------------------------------------------------------------------------*/
+static int f_clearcolor(lua_State *L) {
+	if (lua_gettop(L) > 0) {
+		clear_color = (Uint8)luaL_checkinteger(L, 1) % 16;
+	}
+	lua_pushinteger(L, clear_color);
+	return 1;
+}
+
+
+/*----------------------------------------------------------------------------*/
 static int f_fullscreen(lua_State *L) {
 	Uint32 flags;
 
@@ -399,7 +415,7 @@ static int f_mousecursor(lua_State *L) {
 /*----------------------------------------------------------------------------*/
 static int f_clear(lua_State *L) {
 	int x, y;
-	Uint8 color = (Uint8)luaL_optinteger(L, 1, 0);
+	Uint8 color = (Uint8)luaL_optinteger(L, 1, clear_color);
 
 	for (y = clip_tl.y; y <= clip_br.y; ++y) {
 		for (x = clip_tl.x; x <= clip_br.x; ++x) {
@@ -645,6 +661,7 @@ static const luaL_Reg funcs[] = {
 	{ "screen", f_screen },
 	{ "palette", f_palette },
 	{ "color", f_color },
+	{ "clearcolor", f_clearcolor },
 	{ "fullscreen", f_fullscreen },
 	{ "mousecursor", f_mousecursor },
 
